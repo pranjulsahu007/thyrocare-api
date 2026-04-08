@@ -17,8 +17,8 @@ app.add_middleware(
 )
 
 @app.get("/")
-def health_check():
-    return {"status": "ok", "message": "Thyrocare Parser API is running"}
+def root():
+    return {"status": "API running"}
 
 @app.post("/parse-report")
 async def parse_report(file: UploadFile = File(...)):
