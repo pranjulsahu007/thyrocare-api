@@ -3,7 +3,12 @@ import shutil
 import tempfile
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from soem import ocr_pdf, extract_phenoage_inputs
+print("Starting API...")
+try:
+    from soem import ocr_pdf, extract_phenoage_inputs
+    print("Successfully imported soem modules.")
+except Exception as e:
+    print(f"Error importing soem: {e}")
 
 app = FastAPI(title="Thyrocare Parser API")
 
