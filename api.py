@@ -21,9 +21,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.api_route("/", methods=["GET", "HEAD"])
-def root():
+@app.get("/")
+async def root():
     return {"status": "API running"}
+
+@app.head("/")
+async def root_head():
+    return None
 
 @app.post("/parse-report")
 async def parse_report(file: UploadFile = File(...)):
