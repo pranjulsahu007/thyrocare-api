@@ -14,6 +14,11 @@ NEUTRAL_VALUES = {
     "wbc": 6.5             # x10^3/µL
 }
 
+def normalize_glucose(value, source):
+    if source == "abg":
+        return value * 0.85
+    return value
+
 def compute_phenoage(d):
     # Ensure crp is at least 0.01 to avoid log errors
     crp_val = max(d["crp"], 0.01)
@@ -92,7 +97,14 @@ def extract_phenoage_inputs(text):
 
     data["albumin"] = extract_value_multi([r'albumin[^0-9]*([\d\.]+)\s*g.*dl'], text)
     data["creatinine"] = extract_value_multi([r'creatinine[^0-9]*([\d\.]+)\s*m.*dl'], text)
-    data["glucose"] = extract_value_multi([r'average blood glucose \(abg\)[^0-9]*([\d\.]+)', r'glucose[^0-9]*([\d\.]+)\s*m.*dl'], text)
+    
+    # Glucose with normalization for ABG
+    glucose_abg = extract_value_multi([r'average blood glucose \(abg\)[^0-9]*([\d\.]+)'], text)
+    if glucose_abg is not None:
+        data["glucose"] = normalize_glucose(glucose_abg, "abg")
+    else:
+        data["glucose"] = extract_value_multi([r'glucose[^0-9]*([\d\.]+)\s*m.*dl'], text)
+
     data["crp"] = extract_value_multi([r'(?:hs[- ]?crp|crp)[^0-9]*([\d\.]+)\s*m.*l', r'c-reactive[^0-9]*([\d\.]+)\s*m.*l'], text)
     data["lymphocyte"] = extract_value_multi([r'lymphocyte[^0-9]*([\d\.]+)\s*%'], text)
     data["mcv"] = extract_value_multi([r'mcv\)?.*?([\d\.]+)\s*f.*l', r'mcv[^0-9]*([\d\.]+)\s*f?l'], text)
