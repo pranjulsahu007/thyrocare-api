@@ -34,16 +34,15 @@ def compute_phenoage(d):
 
     gamma = 0.0076927
 
-    mortality = 1 - math.exp(
-        (-math.exp(xb) * (math.exp(120 * gamma) - 1)) / gamma
-    )
+    # numerically stable version
+    exp_xb = math.exp(xb)
+    term = (math.exp(120 * gamma) - 1) / gamma
 
-    mortality = max(min(mortality, 0.999999), 1e-6)
+    mortality = 1 - math.exp(-exp_xb * term)
 
-    pheno_age = (
-        141.50225 +
-        math.log(-0.00553 * math.log(1 - mortality)) / 0.090165
-    )
+    mortality = max(min(mortality, 0.999999), 1e-10)
+
+    pheno_age = 141.50225 + math.log(-0.00553 * math.log(1 - mortality)) / 0.090165
 
     return pheno_age
 
