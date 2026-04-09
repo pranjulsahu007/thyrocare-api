@@ -46,7 +46,8 @@ async def parse_report(file: UploadFile = File(...)):
         return {
             "success": True,
             "filename": file.filename,
-            "data": data
+            "data": data,
+            "raw_text": text
         }
     except Exception as e:
         if 'tmp_path' in locals() and os.path.exists(tmp_path):
