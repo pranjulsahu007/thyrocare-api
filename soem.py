@@ -1,5 +1,51 @@
 import re
 import fitz
+import math
+
+NEUTRAL_VALUES = {
+    "albumin": 4.3,        # g/dL
+    "creatinine": 0.9,     # mg/dL
+    "glucose": 90,         # mg/dL
+    "crp": 1.0,            # mg/L
+    "lymphocyte": 30,      # %
+    "mcv": 90,             # fL
+    "rdw": 13.5,           # %
+    "alp": 70,             # IU/L
+    "wbc": 6.5             # x10^3/µL
+}
+
+def compute_phenoage(d):
+    # Ensure crp is at least 0.01 to avoid log errors
+    crp_val = max(d["crp"], 0.01)
+    
+    xb = (
+        -19.907
+        - 0.0336 * d["albumin"]
+        + 0.0095 * d["creatinine"]
+        + 0.0095 * d["glucose"]
+        + 0.0954 * math.log(crp_val)
+        - 0.012 * d["lymphocyte"]
+        + 0.0268 * d["mcv"]
+        + 0.3306 * d["rdw"]
+        + 0.00188 * d["alp"]
+        + 0.0554 * d["wbc"]
+        + 0.0804 * d["age"]
+    )
+
+    gamma = 0.0076927
+
+    mortality = 1 - math.exp(
+        (-math.exp(xb) * (math.exp(120 * gamma) - 1)) / gamma
+    )
+
+    mortality = max(min(mortality, 0.999999), 1e-6)
+
+    pheno_age = (
+        141.50225 +
+        math.log(-0.00553 * math.log(1 - mortality)) / 0.090165
+    )
+
+    return pheno_age
 
 # ---------- PDF Text Extraction ----------
 def ocr_pdf(pdf_path):
@@ -60,4 +106,42 @@ def extract_phenoage_inputs(text):
     if data["wbc"] and data["wbc"] > 50:
         data["wbc"] = data["wbc"] / 1000
 
-    return data
+    # ---------- Handle Missing Values & Compute PhenoAge ----------
+    missing = [k for k, v in data.items() if v is None and k != "age"]
+    
+    # Fill missing values with neutrals for the calculation
+    calc_data = data.copy()
+    for k in missing:
+        calc_data[k] = NEUTRAL_VALUES.get(k, 0)
+    
+    # Default age if not found (though age is usually present)
+    if calc_data.get("age") is None:
+        calc_data["age"] = 30 # fallback
+        if "age" not in missing: missing.append("age")
+
+    pheno_age = None
+    status = "high_confidence"
+    message = "PhenoAge computed successfully"
+
+    if len(missing) > 3:
+        status = "low_confidence"
+        message = f"Too many biomarkers missing ({len(missing)}: {', '.join(missing)}). Results may be inaccurate."
+    elif len(missing) > 0:
+        status = "medium_confidence"
+        message = f"Some biomarkers missing ({len(missing)}: {', '.join(missing)}), using neutral values."
+
+    try:
+        pheno_age = compute_phenoage(calc_data)
+    except Exception as e:
+        message = f"Error computing PhenoAge: {str(e)}"
+        status = "error"
+
+    return {
+        "biomarkers": data,
+        "calculation_data": calc_data,
+        "pheno_age": pheno_age,
+        "status": status,
+        "message": message,
+        "missing_count": len(missing),
+        "missing_biomarkers": missing
+    }
