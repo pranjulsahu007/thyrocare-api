@@ -47,11 +47,11 @@ def extract_phenoage_inputs(text):
 
     data["albumin"] = extract_value_multi([r'albumin[^0-9]*([\d\.]+)\s*g.*dl'], text)
     data["creatinine"] = extract_value_multi([r'creatinine[^0-9]*([\d\.]+)\s*m.*dl'], text)
-    data["glucose"] = extract_value_multi([r'(?:glucose|fasting blood sugar|abg)[^0-9]*([\d\.]+)', r'glucose[^0-9]*([\d\.]+)\s*m.*dl'], text)
+    data["glucose"] = extract_value_multi([r'average blood glucose \(abg\)[^0-9]*([\d\.]+)', r'glucose[^0-9]*([\d\.]+)\s*m.*dl'], text)
     data["crp"] = extract_value_multi([r'(?:hs[- ]?crp|crp)[^0-9]*([\d\.]+)\s*m.*l', r'c-reactive[^0-9]*([\d\.]+)\s*m.*l'], text)
     data["lymphocyte"] = extract_value_multi([r'lymphocyte[^0-9]*([\d\.]+)\s*%'], text)
     data["mcv"] = extract_value_multi([r'mcv\)?.*?([\d\.]+)\s*f.*l', r'mcv[^0-9]*([\d\.]+)\s*f?l'], text)
-    data["rdw"] = extract_value_multi([r'rdw[- ]?cv.*?([\d\.]+)', r'rdw[^0-9]*([\d\.]+)\s*%'], text)
+    data["rdw"] = extract_value_multi([r'rdw\s*-\s*cv[^0-9]*([\d\.]+)', r'rdw[- ]?cv.*?([\d\.]+)', r'rdw[^0-9]*([\d\.]+)\s*%'], text)
     data["alp"] = extract_value_multi([r'alkaline phosphatase[^0-9]*([\d\.]+)', r'\balp[^0-9]*([\d\.]+)'], text)
     data["wbc"] = extract_value_multi([r'total leucocyte count[^0-9]*([\d\.]+)', r'wbc[^0-9]*([\d\.]+)', r'leucocytes[^0-9]*([\d\.]+)\s*thou'], text)
     data["age"] = extract_value_multi([r'(\d+)\s*y/?[mf]', r'age[^0-9]*([\d\.]+)'], text)
