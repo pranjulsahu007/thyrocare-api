@@ -1,8 +1,12 @@
 import os
 import shutil
 import tempfile
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 print("Starting API...")
 try:
     from soem import ocr_pdf, extract_phenoage_inputs
@@ -29,28 +33,115 @@ async def root():
 async def root_head():
     return None
 
+class ParseReportUrlRequest(BaseModel):
+    blood_test_report_url: str = Field(..., alias="bloodTestReportUrl")
+    user_id: str | None = Field(default=None, alias="userId")
+    assessment_id: str | None = Field(default=None, alias="assessmentId")
+
+    class Config:
+        allow_population_by_field_name = True
+
+
+def build_report_response(filename, source_type, source_file_url, parsed_data, raw_text, user_id=None, assessment_id=None):
+    return {
+        "success": True,
+        "filename": filename,
+        "source_type": source_type,
+        "source_file_url": source_file_url,
+        "user_id": user_id,
+        "assessment_id": assessment_id,
+        "derived_ages": {
+            "biological_age": parsed_data["pheno_age"],
+            "chronological_age": parsed_data["biomarkers"].get("age"),
+            "metabolic_age": None,
+            "inflammatory_age": None,
+        },
+        "data": parsed_data,
+        "raw_text": raw_text,
+    }
+
+
+def process_pdf_path(tmp_path, filename, source_type, source_file_url=None, user_id=None, assessment_id=None):
+    try:
+        text = ocr_pdf(tmp_path)
+        data = extract_phenoage_inputs(text)
+        return build_report_response(
+            filename=filename,
+            source_type=source_type,
+            source_file_url=source_file_url,
+            parsed_data=data,
+            raw_text=text,
+            user_id=user_id,
+            assessment_id=assessment_id,
+        )
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def save_upload_to_temp(upload_file):
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+        shutil.copyfileobj(upload_file.file, tmp_file)
+        return tmp_file.name
+
+
+def download_pdf_to_temp(url):
+    request = Request(
+        url,
+        headers={
+            "User-Agent": "thyrocare-api/1.0",
+            "Accept": "application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
+        },
+    )
+    with urlopen(request, timeout=30) as response:
+        content_type = response.headers.get("Content-Type", "")
+        if content_type and "pdf" not in content_type.lower() and "octet-stream" not in content_type.lower():
+            raise HTTPException(status_code=400, detail="Remote file must be a PDF")
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+            shutil.copyfileobj(response, tmp_file)
+            return tmp_file.name
+
+
 @app.post("/parse-report")
 async def parse_report(file: UploadFile = File(...)):
-    if not file.filename.endswith(".pdf"):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="File must be a PDF")
 
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-            shutil.copyfileobj(file.file, tmp_file)
-            tmp_path = tmp_file.name
-
-        text = ocr_pdf(tmp_path)
-        data = extract_phenoage_inputs(text)
-        os.remove(tmp_path)
-
-        return {
-            "success": True,
-            "filename": file.filename,
-            "data": data,
-            "raw_text": text
-        }
+        tmp_path = save_upload_to_temp(file)
+        return process_pdf_path(
+            tmp_path=tmp_path,
+            filename=file.filename,
+            source_type="file_upload",
+        )
     except Exception as e:
-        if 'tmp_path' in locals() and os.path.exists(tmp_path):
+        if "tmp_path" in locals() and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/parse-report-url")
+async def parse_report_url(payload: ParseReportUrlRequest):
+    try:
+        tmp_path = download_pdf_to_temp(payload.blood_test_report_url)
+        filename = os.path.basename(payload.blood_test_report_url.split("?")[0]) or "report.pdf"
+        return process_pdf_path(
+            tmp_path=tmp_path,
+            filename=filename,
+            source_type="remote_url",
+            source_file_url=payload.blood_test_report_url,
+            user_id=payload.user_id,
+            assessment_id=payload.assessment_id,
+        )
+    except HTTPException:
+        raise
+    except HTTPError as e:
+        raise HTTPException(status_code=400, detail=f"Unable to download report: HTTP {e.code}")
+    except URLError as e:
+        raise HTTPException(status_code=400, detail=f"Unable to download report: {e.reason}")
+    except Exception as e:
+        if "tmp_path" in locals() and os.path.exists(tmp_path):
             os.remove(tmp_path)
         raise HTTPException(status_code=500, detail=str(e))
 
