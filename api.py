@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 print("Starting API...")
 try:
-    from soem import ocr_pdf, extract_phenoage_inputs
+    from soem import calculate_blood_age, extract_blood_age_inputs, extract_phenoage_inputs, ocr_pdf
     print("Successfully imported soem modules.")
 except Exception as e:
     print(f"Error importing soem: {e}")
@@ -42,6 +42,37 @@ class ParseReportUrlRequest(BaseModel):
         allow_population_by_field_name = True
 
 
+class BloodAgeRequest(BaseModel):
+    age: float = Field(..., example=41)
+    gender: str | None = Field(default=None, example="male")
+    include_insulin: bool = Field(default=True, alias="includeInsulin", example=True)
+    biomarkers: dict[str, float | None] = Field(
+        ...,
+        example={
+            "S-albumin": 42.3,
+            "S-ALP": 96.3,
+            "S-urea": 5.52,
+            "S-cholesterol": 6.41,
+            "S-creatinine": 85.75,
+            "B-HbA1c": 31.14,
+            "S-GGT": 25.1,
+            "RBC": 5.24,
+            "MCV": 91.8,
+            "RDW": 14.8,
+            "MONOabs": 0.46,
+            "NEUabs": 4.89,
+            "LYM": 34.7,
+            "S-ALT": 28.1,
+            "S-25-OH-D": 64.65,
+            "S-glucose": 5.38,
+            "MCH": 28.2,
+        },
+    )
+
+    class Config:
+        allow_population_by_field_name = True
+
+
 def build_report_response(filename, source_type, source_file_url, parsed_data, raw_text, user_id=None, assessment_id=None):
     return {
         "success": True,
@@ -52,6 +83,7 @@ def build_report_response(filename, source_type, source_file_url, parsed_data, r
         "assessment_id": assessment_id,
         "derived_ages": {
             "biological_age": parsed_data["pheno_age"],
+            "blood_age": parsed_data.get("blood_age", {}).get("bio_age"),
             "chronological_age": parsed_data["biomarkers"].get("age"),
             "metabolic_age": None,
             "inflammatory_age": None,
@@ -65,6 +97,14 @@ def process_pdf_path(tmp_path, filename, source_type, source_file_url=None, user
     try:
         text = ocr_pdf(tmp_path)
         data = extract_phenoage_inputs(text)
+        data["blood_age_inputs"] = extract_blood_age_inputs(text)
+        extracted_blood_biomarkers = data["blood_age_inputs"]["biomarkers"]
+        extracted_age = extracted_blood_biomarkers.get("age")
+        if extracted_age is not None:
+            data["blood_age"] = calculate_blood_age(
+                age=extracted_age,
+                biomarkers=extracted_blood_biomarkers,
+            )
         return build_report_response(
             filename=filename,
             source_type=source_type,
@@ -118,7 +158,19 @@ async def parse_report(file: UploadFile = File(...)):
     except Exception as e:
         if "tmp_path" in locals() and os.path.exists(tmp_path):
             os.remove(tmp_path)
-        raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/blood-age")
+async def blood_age(payload: BloodAgeRequest):
+    try:
+        return calculate_blood_age(
+            age=payload.age,
+            biomarkers=payload.biomarkers,
+            include_insulin=payload.include_insulin,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/parse-report-url")
