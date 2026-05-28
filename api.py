@@ -93,6 +93,29 @@ def build_report_response(filename, source_type, source_file_url, parsed_data, r
     }
 
 
+def build_blood_age_report_response(
+    filename,
+    source_type,
+    source_file_url,
+    blood_age_data,
+    extracted_inputs,
+    raw_text,
+    user_id=None,
+    assessment_id=None,
+):
+    return {
+        "success": True,
+        "filename": filename,
+        "source_type": source_type,
+        "source_file_url": source_file_url,
+        "user_id": user_id,
+        "assessment_id": assessment_id,
+        "data": blood_age_data,
+        "extracted_inputs": extracted_inputs,
+        "raw_text": raw_text,
+    }
+
+
 def process_pdf_path(tmp_path, filename, source_type, source_file_url=None, user_id=None, assessment_id=None):
     try:
         text = ocr_pdf(tmp_path)
@@ -110,6 +133,43 @@ def process_pdf_path(tmp_path, filename, source_type, source_file_url=None, user
             source_type=source_type,
             source_file_url=source_file_url,
             parsed_data=data,
+            raw_text=text,
+            user_id=user_id,
+            assessment_id=assessment_id,
+        )
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def process_blood_age_pdf_path(
+    tmp_path,
+    filename,
+    source_type,
+    source_file_url=None,
+    user_id=None,
+    assessment_id=None,
+):
+    try:
+        text = ocr_pdf(tmp_path)
+        extracted_inputs = extract_blood_age_inputs(text)
+        extracted_biomarkers = extracted_inputs["biomarkers"]
+        extracted_age = extracted_biomarkers.get("age")
+
+        if extracted_age is None:
+            raise HTTPException(status_code=400, detail="Unable to extract age from report for blood age calculation")
+
+        blood_age_data = calculate_blood_age(
+            age=extracted_age,
+            biomarkers=extracted_biomarkers,
+        )
+
+        return build_blood_age_report_response(
+            filename=filename,
+            source_type=source_type,
+            source_file_url=source_file_url,
+            blood_age_data=blood_age_data,
+            extracted_inputs=extracted_inputs,
             raw_text=text,
             user_id=user_id,
             assessment_id=assessment_id,
@@ -158,7 +218,27 @@ async def parse_report(file: UploadFile = File(...)):
     except Exception as e:
         if "tmp_path" in locals() and os.path.exists(tmp_path):
             os.remove(tmp_path)
-            raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/blood-age-from-report")
+async def blood_age_from_report(file: UploadFile = File(...)):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="File must be a PDF")
+
+    try:
+        tmp_path = save_upload_to_temp(file)
+        return process_blood_age_pdf_path(
+            tmp_path=tmp_path,
+            filename=file.filename,
+            source_type="file_upload",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        if "tmp_path" in locals() and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/blood-age")
@@ -171,6 +251,31 @@ async def blood_age(payload: BloodAgeRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/blood-age-from-report-url")
+async def blood_age_from_report_url(payload: ParseReportUrlRequest):
+    try:
+        tmp_path = download_pdf_to_temp(payload.blood_test_report_url)
+        filename = os.path.basename(payload.blood_test_report_url.split("?")[0]) or "report.pdf"
+        return process_blood_age_pdf_path(
+            tmp_path=tmp_path,
+            filename=filename,
+            source_type="remote_url",
+            source_file_url=payload.blood_test_report_url,
+            user_id=payload.user_id,
+            assessment_id=payload.assessment_id,
+        )
+    except HTTPException:
+        raise
+    except HTTPError as e:
+        raise HTTPException(status_code=400, detail=f"Unable to download report: HTTP {e.code}")
+    except URLError as e:
+        raise HTTPException(status_code=400, detail=f"Unable to download report: {e.reason}")
+    except Exception as e:
+        if "tmp_path" in locals() and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/parse-report-url")

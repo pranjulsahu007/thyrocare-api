@@ -172,6 +172,14 @@ def get_range_color(age_acceleration):
     return "red"
 
 
+def get_blood_age_status(missing_count):
+    if missing_count >= 8:
+        return "low_confidence"
+    if missing_count >= 3:
+        return "medium_confidence"
+    return "high_confidence"
+
+
 def extract_blood_age_inputs(text):
     data = {}
     data["age"] = extract_value_multi([r"(\d+)\s*y/?[mf]", r"age[^0-9]*([\d\.]+)"], text)
@@ -384,6 +392,12 @@ def calculate_blood_age(age: float, biomarkers: dict[str, Any], include_insulin:
     if not include_insulin:
         warnings.append("S-insulin excluded from scoring by request.")
 
+    status = get_blood_age_status(len(missing_biomarkers))
+    if missing_biomarkers:
+        message = f"Blood age computed with {len(missing_biomarkers)} neutral biomarkers."
+    else:
+        message = "Blood age computed successfully."
+
     return {
         "bio_age": round(bio_age, 1),
         "age_acceleration": round(age_acceleration, 1),
@@ -391,7 +405,10 @@ def calculate_blood_age(age: float, biomarkers: dict[str, Any], include_insulin:
         "range_color": get_range_color(age_acceleration),
         "scores": scores,
         "missing_biomarkers": missing_biomarkers,
+        "missing_count": len(missing_biomarkers),
         "warnings": warnings,
+        "status": status,
+        "message": message,
         "biomarker_count_used": len(scores) - len(missing_biomarkers),
         "neutral_biomarker_count": len(missing_biomarkers),
     }
