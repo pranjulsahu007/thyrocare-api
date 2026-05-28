@@ -85,8 +85,6 @@ def build_report_response(filename, source_type, source_file_url, parsed_data, r
             "biological_age": parsed_data["pheno_age"],
             "blood_age": parsed_data.get("blood_age", {}).get("bio_age"),
             "chronological_age": parsed_data["biomarkers"].get("age"),
-            "metabolic_age": None,
-            "inflammatory_age": None,
         },
         "data": parsed_data,
         "raw_text": raw_text,
